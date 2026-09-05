@@ -1,63 +1,101 @@
 import readline from "node:readline/promises";
-import { StateGraph, START, END, MessagesAnnotation } from "@langchain/langgraph";
+import {
+  StateGraph,
+  START,
+  END,
+  MessagesAnnotation,
+} from "@langchain/langgraph";
+
 import { ChatGroq } from "@langchain/groq";
+import { ToolNode, toolsCondition } from "@langchain/langgraph/prebuilt";
+import dotenv from "dotenv";
+import { TavilySearch } from "@langchain/tavily";
+dotenv.config();
 
 
 
-// initialize the LLM
-const llm = new ChatGroq({
-  apiKey: process.env.GROQ_API_KEY, // Default value.
-  model: "llama-3.1-8b-instant",
-  temperature: 0.7,
-
+const tool=new TavilySearch({
+  apiKey: process.env.TAVILY_API_KEY,
+  maxResults: 3,
+  topic: "general"
 });
 
-// DEFINE NODE FUNCTION
-function CallNode(state){
-// call thellm using api
-console.log("Calling LLM with state:", state)
-return state
+
+const tools=[tool]
+// initialize the tool node
+const toolNode = new ToolNode(tools);
+
+// Initialize LLM
+const llm = new ChatGroq({
+  apiKey: process.env.GROQ_API_KEY,
+  model: "openai/gpt-oss-20b",
+  temperature: 0,
+  maxRetries: 3,
+}).bindTools(tools);
+
+// Node function
+async function callNode(state) {
+  const response = await llm.invoke(state.messages);
+
+  return {
+    messages: [response],
+  };
+}
+
+// conditional edges function
+
+function conditionalEdges(state) {
+// here put your condition
+// whether to call the tools or end the workflow
+
+  
+
+
+
 }
 
 
-// build the Graph
-const wrokflow=new StateGraph(MessagesAnnotation).addNode("agent",CallNode,
-)
-.addEdge("__start__","agent")
-.addEdge("agent","__end__")
+// Build graph
+const workflow = new StateGraph(MessagesAnnotation)
+  .addNode("agent", callNode)
+  .addNode("tools", toolNode)
+  .addEdge(START, "agent")
+  .addEdge(toolsCondition, "agent")
+  .addConditionalEdges("agent")
 
 
-// compile and invoke the graph
-const app= wrokflow.compile()
+// Compile graph
+const app = workflow.compile();
 
-const rl =readline.createInterface({
-    input: process.stdin,
-  output: process.stdout
-})
+// Readline
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
 
-
-
-
-
-
+// Main function
 async function main() {
+  while (true) {
+    const userInput = await rl.question("you: ");
 
-    while (true) {
-        const userInput = await rl.question("What is your name? ");
-        if(userInput.toLowerCase() === "exit") {
-            console.log("Exiting...");
-            break;
-        }
+    if (userInput.toLowerCase() === "exit") {
+      console.log("Exiting...");
+      break;
+    }
 
-        // Invoke the graph
-         const finalState = await app.invoke({
-      messages: [{ role: "user", content: userInput }],
+    const finalState = await app.invoke({
+      messages: [
+        {
+          role: "user",
+          content: userInput,
+        },
+      ],
     });
 
-        console.log("Final State:", finalState);
+    console.log("AI:", finalState.messages.at(-1).content);
+  }
 
-    rl.close();
-}
+  rl.close();
 }
 
 main();
